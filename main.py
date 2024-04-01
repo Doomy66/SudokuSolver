@@ -29,10 +29,11 @@ class Point:
 
 
 @dataclass
-class Sukoku:
-    startpos: str = ""
-    name: str = ''
+class Sudoku:
+    startpos: str
+    name: str = '<No Name>'
     points: list = field(default_factory=list[Point])
+    # Are classvars instead of Globals for smartness. Need to reset them if you are to run multiple solutions in 1 run
     thinks: ClassVar[int] = 0
     guesses: ClassVar[int] = 0
     deductions: ClassVar[int] = 0
@@ -42,23 +43,27 @@ class Sukoku:
     def __post_init__(self):
         # Fill with 0
         self.points = list(Point(int(_/9), _ % 9) for _ in range(9*9))
-        # Apply Start Posistion
+
         point: Point
         if self.startpos:
+            # Apply Start Posistion
             for point in self.points:
                 c: str = f"{self.startpos:81}"[point.col+9*point.row]
                 point.value = int(c) if c in "123456789" else 0
         else:
+            # A default position if you have forgotten to pass one
             self.points[4+(9*4)].value = 1
 
-    def display(self) -> None:
+    def display(self, source: bool = False) -> None:
+        """ Outputs the position in human readable format\n
+        source=True will show characters indicating where each value comes from\n
+             = Think, * Deduce, a 1st Guess, b 2nd Guess etc """
         point: Point
-
         if self.name:
-            print(f"{self.name} - {Sukoku.thinks+Sukoku.deductions+Sukoku.guesses}")
+            print(f"{self.name} - {Sudoku.thinks+Sudoku.deductions+Sudoku.guesses}")
         for point in self.points:
             print(
-                f" {point.value if point.value else '.'}{point.source}{'|' if point.col==2 or point.col == 5 else ''}", end='')
+                f" {point.value if point.value else '.'}{point.source if source else ' '}{'|' if point.col==2 or point.col == 5 else ''}", end='')
             if point.col == 8:
                 print('')
                 if point.row == 2 or point.row == 5:
@@ -82,14 +87,14 @@ class Sukoku:
         return self.oncol(point) | self.onrow(point) | self.in3x3(point) | point.failed
 
     def available(self, point: Point) -> set[int]:
-        """Set of available values"""
-        """Value is Cached for speed. Need to run clearcache if state is altered"""
+        """Set of available values.\n
+        Value is Cached for speed. Need to run clearcache if state is altered"""
         if point.value == 0 and not point._available:
             point._available = {1, 2, 3, 4, 5, 6, 7, 8, 9} - self.used(point)
         return point._available
 
     def deduce(self, point: Point) -> set[int]:
-        # Deduce if this point has only 1 possible value
+        """ Deduce if this point has only 1 possible value """
         deducerow = set()
         deducecol = set()
         p: Point
@@ -106,8 +111,8 @@ class Sukoku:
         else:
             return set()
 
-    def assumptions(self) -> list[set[Point]]:
-        ## List of points that can be deduced ##
+    def deduced(self) -> list[set[Point]]:
+        ## List of points that can be deduced to a single value using the more advance method ##
         ans = list(p for p in self.points if p.value == 0 and len(
             self.available(p)) > 1 and self.deduce(p))
         return ans
@@ -138,32 +143,34 @@ class Sukoku:
         self.clearcache()
 
     def failed(self, point: Point, value: int):
-        Sukoku.fails += 1
+        """ Record a failure """
+        Sudoku.fails += 1
         point.failed.add(value)
         self.clearcache()
 
 
-def solve(s: Sukoku, level: int, deduce: bool = False):
+def solve(s: Sudoku, level: int, deduce: bool = True):
+    """ Solves a Sukdoku and displays the result.\nIf it has to guess, it will recurse """
     global starttime
     todo: Point
     if starttime == 0:
         starttime = perf_counter()
-    Sukoku.maxlevel = max(Sukoku.maxlevel, level)
+    Sudoku.maxlevel = max(Sudoku.maxlevel, level)
 
     # Known values
-    while s.todo() and (len(s.available(s.todo()[0])) == 1 or (deduce and s.assumptions())):
+    while s.todo() and (len(s.available(s.todo()[0])) == 1 or (deduce and s.deduced())):
         if len(s.available(s.todo()[0])) == 1:
             todo = s.todo()[0]
             available = s.available(todo)
             s.setpoint(todo, next(iter(available)), '=')
-            Sukoku.thinks += 1
+            Sudoku.thinks += 1
 
         else:
-            # We can deduce a/some points, but it takes time
-            todo = s.assumptions()[0]
+            # We can deduce a/some points
+            todo = s.deduced()[0]
             available = s.deduce(todo)
             s.setpoint(todo, next(iter(available)), '*')
-            Sukoku.deductions += 1
+            Sudoku.deductions += 1
 
     # Going to have to guess
     while s.todo():
@@ -175,10 +182,11 @@ def solve(s: Sukoku, level: int, deduce: bool = False):
             nexttodo: Point = nextlevel.todo()[0]
             nextlevel.setpoint(nexttodo, use, 'abcedfghijk'[
                                len(nexttodo.failed)])
-            Sukoku.guesses += 1
+            Sudoku.guesses += 1
             # print('.' * level)
             # nextlevel.display()
-            if solve(nextlevel, level+1, deduce):   # Recurse to solve remaining points
+            # Recurse to solve remaining points
+            if solve(nextlevel, level+1, deduce):
                 return True  # We have a Solution !
             else:
                 # The guess does not lead to a solution, try another on this level
@@ -190,18 +198,17 @@ def solve(s: Sukoku, level: int, deduce: bool = False):
     # We only get here when all points have a value
     s.display()
     print(
-        f"Solved {s.name} with {Sukoku.thinks} thoughts, {Sukoku.deductions} deductions, {Sukoku.guesses} guesses, {Sukoku.fails} fails, {Sukoku.maxlevel} Max Level. {int(perf_counter()-starttime)}s")
+        f"Solved {s.name} with {Sudoku.thinks} thoughts, {Sudoku.deductions} deductions, {Sudoku.guesses} guesses, {Sudoku.fails} fails, {Sudoku.maxlevel} Max Level. {int(perf_counter()-starttime)}s")
     # print(s.tokenize())
     # print(s.tokenize(True))
-    print(', '.join(f"{k}={v}" for k, v in Counter(
-        sorted(s.tokenize(True))).items()))
+    print(', '.join(f"({k}){v}" for k, v in Counter(s.tokenize(True)).items()))
     return True
 
 
 if __name__ == '__main__':
-    s = Sukoku('', 'Simple')
+    s = Sudoku('', 'Simple')  # A Default
     # Set Start Position
-
+    # Example Puzzles
     # # Arto Inkala - ABC News
     # Solved Arto Inkala - ABC News with 438 thoughts, 581 deductions, 74 guesses, 68 fails, 10 Max Level. 8s
     # s = Sukoku(
@@ -249,9 +256,9 @@ if __name__ == '__main__':
     # Reddit r11.9
     # Result 128465379374219856956837142765198423249673581813542967592386714487921635631754298
     # Solved Reddit r11.9 with 3685 thoughts, 2874 deductions, 532 guesses, 522 fails, 14 Max Level. 46s
-    s = Sukoku(
-        '12.4..3..3...1..5...6...1..7...9.....4.6.3.....3..2...5...8.7....7.....5.......98', "Reddit r11.9")
+    # s = Sudoku(
+    #     '12.4..3..3...1..5...6...1..7...9.....4.6.3.....3..2...5...8.7....7.....5.......98', "Reddit r11.9")
 
     print('Solving...')
     s.display()
-    solve(s, 0, True)
+    solve(s, 0)
